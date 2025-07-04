@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import io
 
-
 # --- 核心功能函數 ---
 
 @st.cache_data
@@ -19,14 +18,10 @@ def load_excel_sheets(uploaded_file):
             # 讀取單一工作表
             df = pd.read_excel(xls, sheet_name=sheet_name)
 
-            # --- START: 錯誤修正 ---
-            # 為了避免 PyArrow 類型錯誤，將所有 object 類型的欄位轉換為字串。
-            # 這是導致您看到錯誤的根本原因。
+            # --- 錯誤修正：避免 PyArrow 類型錯誤 ---
             for col in df.columns:
                 if df[col].dtype == 'object':
-                    # 將該欄位中的所有值都轉換成字串格式
                     df[col] = df[col].astype(str)
-            # --- END: 錯誤修正 ---
 
             all_sheets[sheet_name] = df
 
@@ -36,7 +31,6 @@ def load_excel_sheets(uploaded_file):
         return None, None
 
 
-# (後續的程式碼保持不變...)
 def convert_df_to_excel(df):
     """將 DataFrame 轉換為可供下載的 Excel 檔案（in-memory）"""
     output = io.BytesIO()
@@ -46,7 +40,7 @@ def convert_df_to_excel(df):
     return processed_data
 
 
-# --- Streamlit 介面 (保持不變) ---
+# --- Streamlit 介面 ---
 
 st.set_page_config(page_title="Excel 跨檔案合併工具", layout="wide")
 
@@ -58,17 +52,17 @@ st.markdown("""
 3.  設定合併條件後，點擊按鈕即可預覽及下載結果。
 """)
 
+# 初始化 session_state
 if 'merged_df' not in st.session_state:
     st.session_state.merged_df = None
 
+# --- 步驟一：上傳檔案並選擇工作表 ---
 st.header("步驟一：上傳檔案並選擇工作表")
 
 col1, col2 = st.columns(2)
 
 df_left = None
 df_right = None
-sheet_names_left = []
-sheet_names_right = []
 
 with col1:
     st.subheader("主要檔案 (左表)")
@@ -110,6 +104,7 @@ with col2:
             st.write("右表預覽：")
             st.dataframe(df_right.head(), height=200)
 
+# --- 步驟二：設定合併條件與執行 ---
 if df_left is not None and df_right is not None:
     st.header("步驟二：設定合併條件並執行")
 
@@ -147,16 +142,30 @@ if df_left is not None and df_right is not None:
                     st.session_state.merged_df = merged_df
                     st.success("合併成功！")
 
+# --- 步驟三：顯示結果與下載 (優化版本，包含錯誤捕捉) ---
 if st.session_state.merged_df is not None:
     st.header("步驟三：預覽與下載結果")
-    st.info(f"合併結果：共 {st.session_state.merged_df.shape[0]} 列，{st.session_state.merged_df.shape[1]} 欄。")
-    st.dataframe(st.session_state.merged_df)
+    
+    # 創建一個 dataframe 的副本來顯示，避免影響原始合併結果
+    display_df = st.session_state.merged_df.copy()
+    st.info(f"合併結果：共 {display_df.shape[0]} 列，{display_df.shape[1]} 欄。")
+    st.dataframe(display_df)
 
-    excel_data = convert_df_to_excel(st.session_state.merged_df)
-
-    st.download_button(
-        label="📥 下載合併後的 Excel 檔案",
-        data=excel_data,
-        file_name="合併結果.xlsx",
-       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    ) # <--- 像這樣，把右括號補上！
+    # --- START: 下載邏輯優化 ---
+    # 使用 try-except 來捕捉任何可能的錯誤
+    try:
+        # 將 DataFrame 轉換為 Excel 檔案的二進位資料
+        excel_data = convert_df_to_excel(display_df)
+        
+        # 顯示下載按鈕
+        st.download_button(
+            label="📥 下載合併後的 Excel 檔案",
+            data=excel_data,
+            file_name="合併結果.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    except Exception as e:
+        # 如果在轉換或準備下載時發生任何錯誤，都在畫面上明確顯示出來
+        st.error(f"準備下載檔案時發生錯誤，請檢查您的資料。")
+        st.error(f"詳細錯誤訊息：{e}")
+    # --- END: 下載邏輯優化 ---
