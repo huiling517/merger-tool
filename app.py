@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import io
 
-
 # --- 通用輔助函數 ---
 
 def to_excel(df):
@@ -13,7 +12,6 @@ def to_excel(df):
         df.to_excel(writer, index=False, sheet_name='合併結果')
     processed_data = output.getvalue()
     return processed_data
-
 
 def read_and_clean_sheet(file_obj, sheet_name, header_index=0):
     """讀取指定的 Excel 工作表並進行基本清理，防止類型錯誤"""
@@ -30,7 +28,6 @@ def read_and_clean_sheet(file_obj, sheet_name, header_index=0):
             df[col] = df[col].astype(str)
     return df
 
-
 # --- Streamlit 應用程式介面 ---
 
 st.set_page_config(page_title="Excel 全能合併工具", page_icon="🧩", layout="wide")
@@ -42,7 +39,7 @@ app_mode = st.radio(
     "請選擇您要使用的工具模式：",
     ('多檔合併 (縱向/橫向)', '雙檔查找合併 (VLOOKUP)'),
     horizontal=True,
-    label_visibility="collapsed"  # 隱藏標籤，讓介面更簡潔
+    label_visibility="collapsed" # 隱藏標籤，讓介面更簡潔
 )
 
 st.divider()
@@ -51,7 +48,7 @@ st.divider()
 # ======================== 模式一：多檔合併 (縱向/橫向) =========================
 # ==============================================================================
 if app_mode == '多檔合併 (縱向/橫向)':
-
+    
     st.header("模式：多檔合併 (縱向/橫向)")
     st.markdown("此模式可合併多個檔案或單一檔案內的多個工作表。")
 
@@ -76,7 +73,7 @@ if app_mode == '多檔合併 (縱向/橫向)':
                 st.info("橫向合併會將您選定的所有工作表，根據一個「共同欄位」左右拼接。")
                 join_key = st.text_input("請輸入用來對齊的「共同欄位」名稱 (Key)")
                 join_how = st.selectbox("選擇合併類型", ['inner', 'outer', 'left', 'right'])
-
+            
             st.divider()
 
             st.subheader("2. 檔案與工作表設定")
@@ -87,14 +84,14 @@ if app_mode == '多檔合併 (縱向/橫向)':
                     file_buffer = io.BytesIO(uploaded_file.getvalue())
                     xls = pd.ExcelFile(file_buffer)
                     sheet_names = xls.sheet_names
-
+                    
                     selected_sheets = st.multiselect(
                         f"檔案: `{uploaded_file.name}` - 請勾選要合併的工作表 (可多選)",
                         options=sheet_names,
                         default=sheet_names[0] if sheet_names else None,
                         key=f"sheets_{uploaded_file.name}"
                     )
-
+                    
                     if selected_sheets:
                         file_configs[uploaded_file.name] = {
                             "file_object": file_buffer,
@@ -102,7 +99,7 @@ if app_mode == '多檔合併 (縱向/橫向)':
                         }
                 except Exception as e:
                     st.error(f"讀取檔案 '{uploaded_file.name}' 失敗: {e}")
-
+            
             st.divider()
 
             st.subheader("3. 通用設定")
@@ -122,12 +119,12 @@ if app_mode == '多檔合併 (縱向/橫向)':
                         try:
                             df = read_and_clean_sheet(config["file_object"], sheet_name, actual_header_index)
                             if add_source_col and merge_type == '縱向合併 (上下堆疊)':
-                                df['來源檔案'] = filename
-                                df['來源工作表'] = sheet_name
+                               df['來源檔案'] = filename
+                               df['來源工作表'] = sheet_name
                             all_dfs_to_merge.append(df)
                         except Exception as e:
                             error_messages.append(f"讀取 '{filename}' 的 '{sheet_name}' 失敗: {e}")
-
+            
             if error_messages:
                 for error in error_messages: st.error(error)
 
@@ -140,17 +137,15 @@ if app_mode == '多檔合併 (縱向/橫向)':
                         if merge_type == '縱向合併 (上下堆疊)':
                             merged_df = pd.concat(all_dfs_to_merge, ignore_index=True)
                             st.success("🎉 縱向合併成功！")
-                        else:  # 橫向合併
-                            if not join_key:
-                                st.error("橫向合併錯誤：必須提供「共同欄位」。")
-                            elif len(all_dfs_to_merge) < 2:
-                                st.warning("橫向合併至少需要兩個工作表。")
+                        else: # 橫向合併
+                            if not join_key: st.error("橫向合併錯誤：必須提供「共同欄位」。")
+                            elif len(all_dfs_to_merge) < 2: st.warning("橫向合併至少需要兩個工作表。")
                             else:
                                 merged_df = all_dfs_to_merge[0]
                                 for i in range(1, len(all_dfs_to_merge)):
                                     merged_df = pd.merge(merged_df, all_dfs_to_merge[i], on=join_key, how=join_how)
                                 st.success("🎉 橫向合併成功！")
-
+                        
                         if merged_df is not None:
                             st.session_state.final_df = merged_df
                     except Exception as e:
@@ -165,7 +160,7 @@ elif app_mode == '雙檔查找合併 (VLOOKUP)':
     st.markdown("""
     此模式會以**左表**為基礎，從**右表**中查找符合條件的資料，並將指定欄位新增至左表。
     """)
-
+    
     st.subheader("步驟一：上傳檔案並選擇工作表")
     col1, col2 = st.columns(2)
     df_left, df_right = None, None
@@ -213,9 +208,8 @@ elif app_mode == '雙檔查找合併 (VLOOKUP)':
             with st.form("vlookup_form"):
                 merge_key = st.selectbox("選擇用來對應的欄位 (共同索引鍵)", common_columns)
                 available_cols_from_right = [col for col in df_right.columns if col != merge_key]
-                cols_to_merge = st.multiselect("選擇要從右表加入到左表的欄位", available_cols_from_right,
-                                               default=available_cols_from_right)
-
+                cols_to_merge = st.multiselect("選擇要從右表加入到左表的欄位", available_cols_from_right, default=available_cols_from_right)
+                
                 submitted_vlookup = st.form_submit_button("🚀 執行查找合併", type="primary")
 
             if submitted_vlookup:
