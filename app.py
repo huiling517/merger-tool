@@ -19,6 +19,16 @@ def read_and_clean_sheet(file_obj, sheet_name, header_index=0):
     file_obj.seek(0)
     df = pd.read_excel(file_obj, sheet_name=sheet_name, header=header_index)
     df.columns = [str(col) for col in df.columns]
+
+    # 類型清理：填充空值並解決類型不一致問題
+    for col in df.columns:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            # 對於數字型欄位，填充空值為 0
+            df[col] = pd.to_numeric(df[col], errors='coerce')  # 將無法轉換的值設為 NaN
+            df[col] = df[col].fillna(0)  # 將 NaN 填充為 0
+        else:
+            # 對於文字型欄位，填充空值為空字串，並確保欄位為文字型
+            df[col] = df[col].astype(str).fillna('')
     return df
 
 
@@ -102,6 +112,7 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
             st.error("錯誤：兩個工作表之間沒有任何共同的欄位名稱，無法進行合併。")
         else:
             with st.form("vlookup_form"):
+                # 選擇多鍵合併的鍵值
                 merge_keys = st.multiselect("選擇用來對應的欄位 (共同索引鍵)", common_columns, default=common_columns[:1])
                 available_cols_from_right = [col for col in df_right.columns if col not in merge_keys]
                 cols_to_merge = st.multiselect("選擇要從右表加入到左表的欄位", available_cols_from_right,
@@ -118,21 +129,34 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
                 else:
                     with st.spinner("正在合併資料並進行分析..."):
                         try:
+                            # 確保鍵值欄位類型一致
+                            for key in merge_keys:
+                                df_left[key] = df_left[key].astype(str).fillna('')  # 強制轉為文字型
+                                df_right[key] = df_right[key].astype(str).fillna('')  # 強制轉為文字型
+
+                            # 檢測右表中的重複鍵值
                             duplicated_rows = df_right[df_right.duplicated(subset=merge_keys, keep=False)]
                             if not duplicated_rows.empty:
                                 st.session_state.duplication_warning_keys = duplicated_rows[
                                     merge_keys].drop_duplicates().values.tolist()
+                                st.warning(f"右表中存在以下重複鍵值的記錄：{st.session_state.duplication_warning_keys}")
 
+                            # 選擇右表需要的欄位
                             df_right_selected = df_right[merge_keys + cols_to_merge]
+
+                            # 執行合併
                             merged_df = pd.merge(df_left, df_right_selected, on=merge_keys, how='left')
 
+                            # 合併後檢查重複鍵值問題（標註）
                             duplicated_keys = st.session_state.get('duplication_warning_keys', [])
                             if duplicated_keys:
                                 merged_df['備註'] = ''
                                 condition = merged_df[merge_keys].apply(tuple, axis=1).isin(
-                                    [tuple(x) for x in duplicated_keys])
+                                    [tuple(x) for x in duplicated_keys]
+                                )
                                 merged_df.loc[condition, '備註'] = '一對多關係提醒'
 
+                            # 儲存結果
                             st.session_state.final_df = merged_df
                             st.success("🎉 查找合併成功！")
 
