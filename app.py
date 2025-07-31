@@ -115,8 +115,7 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
                 # 選擇多鍵合併的鍵值
                 merge_keys = st.multiselect("選擇用來對應的欄位 (共同索引鍵)", common_columns, default=common_columns[:1])
                 available_cols_from_right = [col for col in df_right.columns if col not in merge_keys]
-                cols_to_merge = st.multiselect("選擇要從右表加入到左表的欄位", available_cols_from_right,
-                                               default=available_cols_from_right)
+                cols_to_merge = st.multiselect("選擇要從右表加入到左表的欄位", available_cols_from_right, default=available_cols_from_right)
 
                 submitted_vlookup = st.form_submit_button("🚀 執行查找合併", type="primary")
 
@@ -137,8 +136,7 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
                             # 檢測右表中的重複鍵值
                             duplicated_rows = df_right[df_right.duplicated(subset=merge_keys, keep=False)]
                             if not duplicated_rows.empty:
-                                st.session_state.duplication_warning_keys = duplicated_rows[
-                                    merge_keys].drop_duplicates().values.tolist()
+                                st.session_state.duplication_warning_keys = duplicated_rows[merge_keys].drop_duplicates().values.tolist()
                                 st.warning(f"右表中存在以下重複鍵值的記錄：{st.session_state.duplication_warning_keys}")
 
                             # 選擇右表需要的欄位
@@ -151,17 +149,21 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
                             duplicated_keys = st.session_state.get('duplication_warning_keys', [])
                             if duplicated_keys:
                                 merged_df['備註'] = ''
-                                condition = merged_df[merge_keys].apply(tuple, axis=1).isin(
-                                    [tuple(x) for x in duplicated_keys]
-                                )
+                                condition = merged_df[merge_keys].apply(tuple, axis=1).isin([tuple(x) for x in duplicated_keys])
                                 merged_df.loc[condition, '備註'] = '一對多關係提醒'
+
+                            # 新增：篩選出未匹配的資料
+                            unmatched_df = merged_df[merged_df[cols_to_merge[0]].isna()]  # 假設第一個合併欄位作為檢查
+                            if not unmatched_df.empty:
+                                st.warning("以下為未能匹配到右表資料的左表記錄：")
+                                st.dataframe(unmatched_df, use_container_width=True)
 
                             # 儲存結果
                             st.session_state.final_df = merged_df
                             st.success("🎉 查找合併成功！")
 
                         except Exception as e:
-                            st.error(f"合併失敗: {e}")
+                            st.error(f"合併失敗: {e}") 
 
 # ==============================================================================
 # 模式二：多檔合併 (縱向/橫向)
