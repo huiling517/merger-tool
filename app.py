@@ -32,15 +32,6 @@ def read_and_clean_sheet(file_obj, sheet_name, header_index=0):
     return df
 
 
-def highlight_duplicated_keys(row, duplicated_keys_set, key_columns):
-    """如果行的索引鍵在重複集合中，則標註背景色"""
-    color = 'background-color: #fff9c4'
-    default_color = ''
-    if tuple(row[key_columns]) in duplicated_keys_set:
-        return [color] * len(row)
-    return [default_color] * len(row)
-
-
 # --- Streamlit 應用程式介面 ---
 st.set_page_config(page_title="Excel 全能合併工具", page_icon="🧩", layout="wide")
 
@@ -60,9 +51,9 @@ if 'final_df' not in st.session_state:
 if 'duplication_warning_keys' not in st.session_state:
     st.session_state.duplication_warning_keys = []
 
-# ==============================================================================
+# ======================================================================
 # 模式一：雙檔查找合併 (VLOOKUP)
-# ==============================================================================
+# ======================================================================
 if app_mode == '雙檔查找合併 (VLOOKUP)':
     st.header("模式：雙檔查找合併 (VLOOKUP)")
     st.markdown("此模式會以**左表**為基礎，從**右表**中查找符合條件的資料，並將指定欄位新增至左表。")
@@ -133,29 +124,18 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
                                 df_left[key] = df_left[key].astype(str).fillna('')  # 強制轉為文字型
                                 df_right[key] = df_right[key].astype(str).fillna('')  # 強制轉為文字型
 
-                            # 檢測右表中的重複鍵值
-                            duplicated_rows = df_right[df_right.duplicated(subset=merge_keys, keep=False)]
-                            if not duplicated_rows.empty:
-                                st.session_state.duplication_warning_keys = duplicated_rows[merge_keys].drop_duplicates().values.tolist()
-                                st.warning(f"右表中存在以下重複鍵值的記錄：{st.session_state.duplication_warning_keys}")
-
                             # 選擇右表需要的欄位
                             df_right_selected = df_right[merge_keys + cols_to_merge]
 
                             # 執行合併
                             merged_df = pd.merge(df_left, df_right_selected, on=merge_keys, how='left')
 
-                            # 合併後檢查重複鍵值問題（標註）
-                            duplicated_keys = st.session_state.get('duplication_warning_keys', [])
-                            if duplicated_keys:
-                                merged_df['備註'] = ''
-                                condition = merged_df[merge_keys].apply(tuple, axis=1).isin([tuple(x) for x in duplicated_keys])
-                                merged_df.loc[condition, '備註'] = '一對多關係提醒'
-
-                            # 新增：篩選出未匹配的資料
-                            unmatched_df = merged_df[merged_df[cols_to_merge[0]].isna()]  # 假設第一個合併欄位作為檢查
+                            # 新增：篩選出右表未匹配到左表的資料
+                            unmatched_df = df_right[
+                                ~df_right[merge_keys].apply(tuple, axis=1).isin(df_left[merge_keys].apply(tuple, axis=1))
+                            ]
                             if not unmatched_df.empty:
-                                st.warning("以下為未能匹配到右表資料的左表記錄：")
+                                st.warning("以下為未能匹配到左表資料的右表記錄：")
                                 st.dataframe(unmatched_df, use_container_width=True)
 
                             # 儲存結果
@@ -163,7 +143,7 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
                             st.success("🎉 查找合併成功！")
 
                         except Exception as e:
-                            st.error(f"合併失敗: {e}") 
+                            st.error(f"合併失敗: {e}")
 
 # ==============================================================================
 # 模式二：多檔合併 (縱向/橫向)
@@ -293,6 +273,7 @@ elif app_mode == '多檔合併 (縱向/橫向)':
                             st.success("🎉 合併成功！")
                     except Exception as e:
                         st.error(f"合併失敗: {e}")
+
 
 # --- 通用結果顯示區 ---
 if 'final_df' in st.session_state and st.session_state.final_df is not None:
