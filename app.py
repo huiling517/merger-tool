@@ -16,18 +16,19 @@ def to_excel(df):
 
 def read_and_clean_sheet(file_obj, sheet_name, header_index=0):
     """讀取指定的 Excel 工作表並進行基本清理"""
-    # 每次讀取前將檔案指針移到開頭
     file_obj.seek(0)
     df = pd.read_excel(file_obj, sheet_name=sheet_name, header=header_index)
-    df.columns = [str(col).strip() for col in df.columns] # 清理欄位名稱前後空白
+    df.columns = [str(col) for col in df.columns]
 
     # 類型清理：填充空值並解決類型不一致問題
     for col in df.columns:
-        try:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-            df[col] = df[col].fillna(0) # 數字類型 NaN 填充 0
-        except Exception:
-            df[col] = df[col].astype(str).fillna('') # 文字類型 NaN 填充空字串
+        if pd.api.types.is_numeric_dtype(df[col]):
+            # 對於數字型欄位，填充空值為 0
+            df[col] = pd.to_numeric(df[col], errors='coerce')  # 將無法轉換的值設為 NaN
+            df[col] = df[col].fillna(0)  # 將 NaN 填充為 0
+        else:
+            # 對於文字型欄位，填充空值為空字串，並確保欄位為文字型
+            df[col] = df[col].astype(str).fillna('')
     return df
 
 
@@ -67,7 +68,6 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
         if uploaded_file_left:
             try:
                 file_buffer_left = io.BytesIO(uploaded_file_left.getvalue())
-                file_buffer_left.seek(0)
                 sheet_names_left = pd.ExcelFile(file_buffer_left).sheet_names
                 left_sheet_name = st.selectbox("選擇主要工作表", sheet_names_left, key="sheet_left")
                 header_left = st.number_input("左表標頭在第幾列?", min_value=1, value=1, key="header_left")
@@ -84,7 +84,6 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
         if uploaded_file_right:
             try:
                 file_buffer_right = io.BytesIO(uploaded_file_right.getvalue())
-                file_buffer_right.seek(0)
                 sheet_names_right = pd.ExcelFile(file_buffer_right).sheet_names
                 right_sheet_name = st.selectbox("選擇查找資料的工作表", sheet_names_right, key="sheet_right")
                 header_right = st.number_input("右表標頭在第幾列?", min_value=1, value=1, key="header_right")
@@ -101,13 +100,14 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
         common_columns = list(set(df_left.columns) & set(df_right.columns))
 
         if not common_columns:
-            st.error("錯誤：兩個工作表之間沒有任何共同的欄位名稱，無法進行合併。請檢查標頭列和欄位名稱。")
+            st.error("錯誤：兩個工作表之間沒有任何共同的欄位名稱，無法進行合併。")
         else:
             with st.form("vlookup_form"):
+                # 選擇多鍵合併的鍵值
                 merge_keys = st.multiselect("選擇用來對應的欄位 (共同索引鍵)", common_columns, default=common_columns[:1])
-                available_cols_from_right = [col for col in df_right.columns if col not in merge_keys and col not in df_left.columns]
-                cols_to_add_from_right = [col for col in df_right.columns if col not in df_left.columns and col not in merge_keys]
-                cols_to_merge = st.multiselect("選擇要從右表加入到左表的欄位", cols_to_add_from_right, default=cols_to_add_from_right)
+                available_cols_from_right = [col for col in df_right.columns if col not in merge_keys]
+                cols_to_merge = st.multiselect("選擇要從右表加入到左表的欄位", available_cols_from_right, default=available_cols_from_right)
+
                 submitted_vlookup = st.form_submit_button("🚀 執行查找合併", type="primary")
 
             if submitted_vlookup:
@@ -119,22 +119,26 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
                 else:
                     with st.spinner("正在合併資料並進行分析..."):
                         try:
+                            # 確保鍵值欄位類型一致
                             for key in merge_keys:
-                                df_left[key] = df_left[key].astype(str).fillna('')
-                                df_right[key] = df_right[key].astype(str).fillna('')
+                                df_left[key] = df_left[key].astype(str).fillna('')  # 強制轉為文字型
+                                df_right[key] = df_right[key].astype(str).fillna('')  # 強制轉為文字型
 
-                            df_right_unique = df_right.drop_duplicates(subset=merge_keys, keep='first')
-                            df_right_selected = df_right_unique[merge_keys + cols_to_merge]
+                            # 選擇右表需要的欄位
+                            df_right_selected = df_right[merge_keys + cols_to_merge]
+
+                            # 執行合併
                             merged_df = pd.merge(df_left, df_right_selected, on=merge_keys, how='left')
 
-                            left_keys_set = set(df_left[merge_keys].apply(lambda x: tuple(x), axis=1))
+                            # 新增：篩選出右表未匹配到左表的資料
                             unmatched_df = df_right[
-                                ~df_right[merge_keys].apply(lambda x: tuple(x), axis=1).isin(left_keys_set)
+                                ~df_right[merge_keys].apply(tuple, axis=1).isin(df_left[merge_keys].apply(tuple, axis=1))
                             ]
                             if not unmatched_df.empty:
-                                st.warning("以下為未能匹配到左表資料的右表記錄（將不包含在合併結果中）：")
+                                st.warning("以下為未能匹配到左表資料的右表記錄：")
                                 st.dataframe(unmatched_df, use_container_width=True)
 
+                            # 儲存結果
                             st.session_state.final_df = merged_df
                             st.success("🎉 查找合併成功！")
 
@@ -165,7 +169,6 @@ elif app_mode == '多檔合併 (縱向/橫向)':
             for uploaded_file in uploaded_files:
                 try:
                     file_buffer = io.BytesIO(uploaded_file.getvalue())
-                    file_buffer.seek(0)
                     xls = pd.ExcelFile(file_buffer)
                     sheet_names = xls.sheet_names
                     file_configs[uploaded_file.name] = {"file_object": file_buffer, "sheet_names": sheet_names}
@@ -187,7 +190,7 @@ elif app_mode == '多檔合併 (縱向/橫向)':
                 )
                 config["selected_sheets"] = selected_sheets
                 for sheet in selected_sheets:
-                    all_selected_sheets_info.append((config["file_object"], sheet, filename))
+                    all_selected_sheets_info.append((config["file_object"], sheet))
 
             if merge_type == '橫向合併 (左右拼接)':
                 st.divider()
@@ -196,18 +199,16 @@ elif app_mode == '多檔合併 (縱向/橫向)':
                 common_columns_for_key = []
                 if all_selected_sheets_info:
                     try:
-                        list_of_all_cols = []
-                        for f_obj, s_name, _ in all_selected_sheets_info:
-                            df_temp = read_and_clean_sheet(f_obj, s_name, header_row_from_user - 1)
-                            list_of_all_cols.append(set(df_temp.columns))
-                        if list_of_all_cols:
-                            common_columns_for_key = list(set.intersection(*list_of_all_cols))
-                            common_columns_for_key = [col for col in common_columns_for_key if not str(col).startswith('Unnamed:')]
+                        dfs_for_cols = [read_and_clean_sheet(f[0], f[1], header_row_from_user - 1) for f in
+                                        all_selected_sheets_info]
+                        if dfs_for_cols:
+                            column_sets = [set(df.columns) for df in dfs_for_cols]
+                            common_columns_for_key = list(set.intersection(*column_sets))
                     except Exception as e:
                         st.warning(f"計算共同欄位時發生錯誤: {e}")
 
                 if not common_columns_for_key:
-                    st.warning("您目前選擇的工作表之間沒有共同欄位，或只有一個工作表，無法進行橫向合併。請確認選取的檔案和工作表。")
+                    st.warning("您目前選擇的工作表之間沒有共同欄位，無法進行橫向合併。")
                 else:
                     join_keys = st.multiselect("請選擇用來對齊的「共同欄位」(Keys)", common_columns_for_key,
                                                default=common_columns_for_key[:1])
@@ -234,12 +235,14 @@ elif app_mode == '多檔合併 (縱向/橫向)':
 
             all_dfs_to_merge = []
             with st.spinner('正在讀取所有選定的工作表...'):
-                for f_obj, sheet_name, filename in all_selected_sheets_info:
-                    df = read_and_clean_sheet(f_obj, sheet_name, header_row_from_user - 1)
-                    if add_source_col and merge_type == '縱向合併 (上下堆疊)':
-                        df['來源檔案'] = filename
-                        df['來源工作表'] = sheet_name
-                    all_dfs_to_merge.append(df)
+                for filename, config in file_configs.items():
+                    if "selected_sheets" in config:
+                        for sheet_name in config["selected_sheets"]:
+                            df = read_and_clean_sheet(config["file_object"], sheet_name, header_row_from_user - 1)
+                            if add_source_col and merge_type == '縱向合併 (上下堆疊)':
+                                df['來源檔案'] = filename
+                                df['來源工作表'] = sheet_name
+                            all_dfs_to_merge.append(df)
 
             if not all_dfs_to_merge:
                 st.warning("未成功讀取任何工作表。")
@@ -248,36 +251,22 @@ elif app_mode == '多檔合併 (縱向/橫向)':
                 with st.spinner('正在執行合併...'):
                     try:
                         if merge_type == '縱向合併 (上下堆疊)':
-                            merged_df = pd.concat(all_dfs_to_merge, ignore_index=True, sort=False)
+                            merged_df = pd.concat(all_dfs_to_merge, ignore_index=True)
                         else:  # 橫向合併
                             if not join_keys:
                                 st.error("橫向合併錯誤：必須提供「共同欄位」。")
                             elif len(all_dfs_to_merge) < 2:
-                                st.warning("橫向合併至少需要兩個工作表才能進行拼接。")
+                                st.warning("橫向合併至少需要兩個工作表。")
                             else:
-                                processed_dfs = []
+                                renamed_dfs = []
                                 for i, df in enumerate(all_dfs_to_merge):
-                                    df_copy = df.copy()
+                                    renamed_columns = {col: f"{col}_df{i + 1}" for col in df.columns if
+                                                       col not in join_keys}
+                                    df = df.rename(columns=renamed_columns)
+                                    renamed_dfs.append(df)
 
-                                    # 確保每個 df 都有 join_keys 欄位，缺漏的補空字串，並轉為字串型別
-                                    for key in join_keys:
-                                        if key not in df_copy.columns:
-                                            df_copy[key] = ''
-                                        df_copy[key] = df_copy[key].astype(str)
-
-                                    # 為非 join_keys 欄位加上唯一後綴，避免重名
-                                    renamed_columns = {}
-                                    for col in df_copy.columns:
-                                        if col not in join_keys:
-                                            renamed_columns[col] = f"{col}__{i+1}"
-                                    df_copy = df_copy.rename(columns=renamed_columns)
-                                    processed_dfs.append(df_copy)
-
-                                # 使用固定 suffixes，避免 pandas 自動加 _x/_y 造成欄位混亂
-                                def merge_two(left, right):
-                                    return pd.merge(left, right, on=join_keys, how=join_how, suffixes=('', ''))
-
-                                merged_df = reduce(merge_two, processed_dfs)
+                                merged_df = reduce(
+                                    lambda left, right: pd.merge(left, right, on=join_keys, how=join_how), renamed_dfs)
 
                         if merged_df is not None:
                             st.session_state.final_df = merged_df
