@@ -23,11 +23,9 @@ def read_and_clean_sheet(file_obj, sheet_name, header_index=0):
     # 類型清理：填充空值並解決類型不一致問題
     for col in df.columns:
         if pd.api.types.is_numeric_dtype(df[col]):
-            # 對於數字型欄位，填充空值為 0
-            df[col] = pd.to_numeric(df[col], errors='coerce')  # 將無法轉換的值設為 NaN
-            df[col] = df[col].fillna(0)  # 將 NaN 填充為 0
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = df[col].fillna(0)
         else:
-            # 對於文字型欄位，填充空值為空字串，並確保欄位為文字型
             df[col] = df[col].astype(str).fillna('')
     return df
 
@@ -103,7 +101,6 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
             st.error("錯誤：兩個工作表之間沒有任何共同的欄位名稱，無法進行合併。")
         else:
             with st.form("vlookup_form"):
-                # 選擇多鍵合併的鍵值
                 merge_keys = st.multiselect("選擇用來對應的欄位 (共同索引鍵)", common_columns, default=common_columns[:1])
                 available_cols_from_right = [col for col in df_right.columns if col not in merge_keys]
                 cols_to_merge = st.multiselect("選擇要從右表加入到左表的欄位", available_cols_from_right, default=available_cols_from_right)
@@ -119,18 +116,13 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
                 else:
                     with st.spinner("正在合併資料並進行分析..."):
                         try:
-                            # 確保鍵值欄位類型一致
                             for key in merge_keys:
-                                df_left[key] = df_left[key].astype(str).fillna('')  # 強制轉為文字型
-                                df_right[key] = df_right[key].astype(str).fillna('')  # 強制轉為文字型
+                                df_left[key] = df_left[key].astype(str).fillna('')
+                                df_right[key] = df_right[key].astype(str).fillna('')
 
-                            # 選擇右表需要的欄位
                             df_right_selected = df_right[merge_keys + cols_to_merge]
-
-                            # 執行合併
                             merged_df = pd.merge(df_left, df_right_selected, on=merge_keys, how='left')
 
-                            # 新增：篩選出右表未匹配到左表的資料
                             unmatched_df = df_right[
                                 ~df_right[merge_keys].apply(tuple, axis=1).isin(df_left[merge_keys].apply(tuple, axis=1))
                             ]
@@ -138,7 +130,6 @@ if app_mode == '雙檔查找合併 (VLOOKUP)':
                                 st.warning("以下為未能匹配到左表資料的右表記錄：")
                                 st.dataframe(unmatched_df, use_container_width=True)
 
-                            # 儲存結果
                             st.session_state.final_df = merged_df
                             st.success("🎉 查找合併成功！")
 
@@ -258,15 +249,38 @@ elif app_mode == '多檔合併 (縱向/橫向)':
                             elif len(all_dfs_to_merge) < 2:
                                 st.warning("橫向合併至少需要兩個工作表。")
                             else:
-                                renamed_dfs = []
+                                # 1) 預處理各 df：確保鍵、字串化、去空白；非鍵欄位加唯一後綴
+                                processed_dfs = []
                                 for i, df in enumerate(all_dfs_to_merge):
-                                    renamed_columns = {col: f"{col}_df{i + 1}" for col in df.columns if
-                                                       col not in join_keys}
-                                    df = df.rename(columns=renamed_columns)
-                                    renamed_dfs.append(df)
+                                    df_copy = df.copy()
 
-                                merged_df = reduce(
-                                    lambda left, right: pd.merge(left, right, on=join_keys, how=join_how), renamed_dfs)
+                                    # 確保 join_keys 存在、字串化、strip
+                                    for key in join_keys:
+                                        if key not in df_copy.columns:
+                                            df_copy[key] = ''
+                                        df_copy[key] = df_copy[key].astype(str).fillna('').str.strip()
+
+                                    # 為非鍵欄位加上唯一後綴，避免重名
+                                    renamed_columns = {}
+                                    for col in df_copy.columns:
+                                        if col not in join_keys:
+                                            renamed_columns[col] = f"{col}_df{i+1}"
+                                    df_copy = df_copy.rename(columns=renamed_columns)
+
+                                    processed_dfs.append(df_copy)
+
+                                # 2) 用固定 suffixes 進行合併，避免 _x/_y
+                                def merge_two(left, right):
+                                    return pd.merge(left, right, on=join_keys, how=join_how, suffixes=('', ''))
+
+                                merged_df = reduce(merge_two, processed_dfs)
+
+                                # 3) 合併後依鍵排序，確保呈現穩定
+                                try:
+                                    sort_by = join_keys.copy()
+                                    merged_df = merged_df.sort_values(by=sort_by, kind='mergesort').reset_index(drop=True)
+                                except Exception:
+                                    pass
 
                         if merged_df is not None:
                             st.session_state.final_df = merged_df
